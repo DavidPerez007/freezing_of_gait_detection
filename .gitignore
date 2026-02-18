@@ -1,0 +1,130 @@
+# ============================================================
+# GITIGNORE - Proyecto Detección de FoG
+# ============================================================
+
+# ==================== PYTHON ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.Python
+
+# ==================== VIRTUAL ENVIRONMENT ====================
+.venv/
+venv/
+ENV/
+env/
+.virtualenv/
+
+# ==================== IDE ====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.spyderproject
+.spyproject
+.ropeproject
+
+# ==================== JUPYTER NOTEBOOK ====================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ==================== DATASETS (NO SUBIR - MUY GRANDES) ====================
+# Raw datasets (~983 MB)
+Datasets/
+
+# ==================== OUTPUTS (NO SUBIR - MUY GRANDES) ====================
+# Todos los archivos generados (~7.8 GB)
+outputs/
+
+# IMPORTANTE: Mantener la estructura de carpetas pero no el contenido
+# Crear archivos .gitkeep para mantener la estructura:
+!outputs/.gitkeep
+!Datasets/.gitkeep
+
+# ==================== ARCHIVOS PROCESADOS ====================
+*.csv
+*.parquet
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.joblib
+
+# EXCEPCIÓN: Permitir archivos CSV pequeños de configuración
+!configs/*.csv
+
+# ==================== MODELOS ENTRENADOS ====================
+*.pth
+*.pt
+*.ckpt
+*.model
+*.weights
+*.h5
+models/checkpoints/
+models/saved_models/
+
+# ==================== COMPRIMIDOS ====================
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.gz
+*.bz2
+
+# ==================== OS ====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ==================== LOGS ====================
+*.log
+logs/
+*.out
+
+# ==================== TEMPORAL ====================
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+
+# ==================== REPORTES Y VISUALIZACIONES ====================
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+
+# EXCEPCIÓN: Permitir imágenes en documentación
+!docs/**/*.png
+!docs/**/*.jpg
+!README_assets/*.png
+
+# ==================== OTROS ====================
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.db
+*.sqlite
+*.sqlite3
+
+# ==================== ESPECÍFICO DEL PROYECTO ====================
+# Archivos de texto muy grandes
+project_structure.txt
+
+# Configuraciones locales
+.env
+.env.local
+config.local.yml
