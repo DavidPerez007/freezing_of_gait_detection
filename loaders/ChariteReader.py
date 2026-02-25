@@ -5,9 +5,12 @@ Dataset Information:
 - Source: Charité - Real-Time Detection of Freezing Motions in Parkinson's Patients
 - Published: 2021, Frontiers in Neurology
 - Sensors: 3D accelerometer + 3D gyroscope @ 200 Hz
-- Placement: Both feet (left and right)
+- Placement: Both feet (left and right), worn simultaneously
 - Subjects: 16 subjects (S1-S16)
 - Trials: 2 trials per subject
+
+Column naming convention: {sensor}_{axis}_{body_position}
+  e.g. acc_x_left_foot, gyr_z_right_foot
 """
 
 import pandas as pd
@@ -19,317 +22,242 @@ from tqdm import tqdm
 from .BaseDatasetLoader import BaseFileReader, BaseDatasetLoader
 
 
+# Raw CSV columns (in order as they appear in the file)
+_RAW_COLUMNS = ['time_s', 'acc_x', 'acc_y', 'acc_z', 'gyr_x', 'gyr_y', 'gyr_z', 'fog_label']
+
+# Sensor channel names (without body position suffix)
+_SENSOR_CHANNELS = ['acc_x', 'acc_y', 'acc_z', 'gyr_x', 'gyr_y', 'gyr_z']
+
+
 class ChariteFileReader(BaseFileReader):
     """Lee archivos individuales del dataset Charité."""
-    
-    # Columnas esperadas en los archivos CSV
-    COLUMN_NAMES = [
-        'time_s',
-        'acc_x_m_s2',    # Aceleración eje X [m/s²]
-        'acc_y_m_s2',    # Aceleración eje Y [m/s²]
-        'acc_z_m_s2',    # Aceleración eje Z [m/s²]
-        'gyr_x_deg_s',   # Velocidad angular eje X [deg/s]
-        'gyr_y_deg_s',   # Velocidad angular eje Y [deg/s]
-        'gyr_z_deg_s',   # Velocidad angular eje Z [deg/s]
-        'fog_label'      # FoG label (1 = FoG activo, 0 = no FoG)
-    ]
-    
-    def read_file(self, file_path: Path) -> pd.DataFrame:
+
+    def read_file(self, file_path: Path, foot: str = None) -> pd.DataFrame:
         """
-        Lee un archivo CSV del dataset Charité.
-        
+        Lee un archivo CSV del dataset Charité y renombra columnas según la posición del pie.
+
         Args:
             file_path: Ruta al archivo .csv
-            
+            foot: 'left' o 'right'. Si es None, se infiere del nombre del archivo.
+
         Returns:
-            DataFrame con los datos del archivo
+            DataFrame con columnas renombradas: acc_x_{foot}_foot, gyr_z_{foot}_foot, etc.
         """
         try:
-            # Leer archivo CSV con encabezados
             df = pd.read_csv(file_path)
-            
-            # Renombrar columnas a nuestro formato estándar
-            df.columns = self.COLUMN_NAMES
-            
-            # Extraer información del nombre del archivo
-            file_info = self._parse_filename(file_path.name)
-            
-            # Agregar metadatos
-            df['subject_id'] = file_info['subject_id']
-            df['trial_id'] = file_info['trial_id']
-            df['foot'] = file_info['foot']
-            df['filename'] = file_path.name
-            
-            # Crear etiqueta descriptiva del FoG
-            df['fog_label_text'] = df['fog_label'].map({
-                0: 'No FoG',
-                1: 'FoG Active'
-            })
-            
+            df.columns = _RAW_COLUMNS
+
+            if foot is None:
+                foot = self._parse_filename(file_path.name)['foot']
+
+            rename_map = {ch: f'{ch}_{foot}_foot' for ch in _SENSOR_CHANNELS}
+            df = df.rename(columns=rename_map)
+
             return df
-            
+
         except Exception as e:
             raise Exception(f"Error leyendo archivo {file_path}: {str(e)}")
-    
+
     @staticmethod
     def _parse_filename(filename: str) -> Dict[str, any]:
         """
         Extrae información del nombre del archivo.
         Formato: S<subject>_<foot>_foot_trial_<trial>.csv
         Ejemplo: S1_left_foot_trial_1.csv
-        
-        Args:
-            filename: Nombre del archivo
-            
-        Returns:
-            Diccionario con subject_id, trial_id y foot
         """
-        # Remover extensión
         name = filename.replace('.csv', '')
-        
-        # Dividir por underscore
         parts = name.split('_')
-        
-        # Extraer información
-        # S1 -> 1
-        subject_id = int(parts[0].replace('S', ''))
-        
-        # left o right
-        foot = parts[1]  # 'left' o 'right'
-        
-        # trial_1 -> 1
-        trial_id = int(parts[4])
-        
         return {
-            'subject_id': subject_id,
-            'trial_id': trial_id,
-            'foot': foot
+            'subject_id': int(parts[0].replace('S', '')),
+            'foot': parts[1],
+            'trial_id': int(parts[4])
         }
 
 
 class ChariteDatasetLoader(BaseDatasetLoader):
-    """Loader para el dataset Charité-Universitätsmedizin Berlin."""
-    
+    """Loader para el dataset Charité-Universitätsmedizin Berlin.
+
+    Fusiona los archivos de pie izquierdo y derecho de cada trial en un único
+    DataFrame con 12 columnas de sensores (ambos pies llevados simultáneamente):
+
+        acc_x_left_foot,  acc_y_left_foot,  acc_z_left_foot,
+        gyr_x_left_foot,  gyr_y_left_foot,  gyr_z_left_foot,
+        acc_x_right_foot, acc_y_right_foot, acc_z_right_foot,
+        gyr_x_right_foot, gyr_y_right_foot, gyr_z_right_foot
+    """
+
+    FEATURE_COLUMNS = [
+        'acc_x_left_foot', 'acc_y_left_foot', 'acc_z_left_foot',
+        'gyr_x_left_foot', 'gyr_y_left_foot', 'gyr_z_left_foot',
+        'acc_x_right_foot', 'acc_y_right_foot', 'acc_z_right_foot',
+        'gyr_x_right_foot', 'gyr_y_right_foot', 'gyr_z_right_foot',
+    ]
+
     def __init__(self, dataset_path: str):
         """
-        Inicializa el cargador del dataset.
-        
         Args:
             dataset_path: Ruta a la carpeta 'data' del dataset Charité
         """
         super().__init__(dataset_path)
         self.file_reader = ChariteFileReader()
-    
-    def get_file_list(self, foot: Optional[str] = None, **kwargs) -> List[Path]:
+
+    def _read_trial(self, subject_id: int, trial_id: int) -> pd.DataFrame:
         """
-        Obtiene lista de todos los archivos CSV en el dataset.
-        
+        Lee y fusiona los archivos de ambos pies para un trial específico.
+
         Args:
-            foot: Filtrar por pie ('left', 'right', None=todos)
-        
+            subject_id: ID del sujeto
+            trial_id: ID del trial (1 o 2)
+
         Returns:
-            Lista de rutas a archivos CSV
+            DataFrame con 12 columnas de sensores fusionadas por timestamp
         """
-        # Buscar en todas las carpetas de sujetos
+        subject_folder = self.dataset_path / f"S{subject_id}"
+
+        left_file = subject_folder / f"S{subject_id}_left_foot_trial_{trial_id}.csv"
+        right_file = subject_folder / f"S{subject_id}_right_foot_trial_{trial_id}.csv"
+
+        df_left = self.file_reader.read_file(left_file, foot='left')
+        df_right = self.file_reader.read_file(right_file, foot='right')
+
+        # Los timestamps son idénticos → combinar columnas directamente
+        right_sensor_cols = [f'{ch}_right_foot' for ch in _SENSOR_CHANNELS]
+        df = df_left.copy()
+        for col in right_sensor_cols:
+            df[col] = df_right[col].values
+
+        df['subject_id'] = subject_id
+        df['trial_id'] = trial_id
+        df['fog_label_text'] = df['fog_label'].map({0: 'No FoG', 1: 'FoG Active'})
+
+        return df
+
+    def get_file_list(self, **kwargs) -> List[Path]:
+        """Obtiene lista de todos los archivos CSV del dataset."""
         files = sorted(self.dataset_path.glob('S*/*_foot_trial_*.csv'))
-        
         if not files:
-            raise FileNotFoundError(
-                f"No se encontraron archivos CSV en {self.dataset_path}"
-            )
-        
-        # Filtrar por pie si se especifica
-        if foot:
-            foot_pattern = f'_{foot}_foot_'
-            files = [f for f in files if foot_pattern in f.name]
-        
+            raise FileNotFoundError(f"No se encontraron archivos CSV en {self.dataset_path}")
         return files
-    
-    def load_all_data(self, verbose: bool = True, foot: Optional[str] = None, **kwargs) -> pd.DataFrame:
+
+    def _get_trials(self) -> List[tuple]:
+        """Retorna lista de (subject_id, trial_id) únicos disponibles."""
+        files = self.get_file_list()
+        trials = set()
+        for f in files:
+            info = self.file_reader._parse_filename(f.name)
+            trials.add((info['subject_id'], info['trial_id']))
+        return sorted(trials)
+
+    def load_all_data(self, verbose: bool = True, **kwargs) -> pd.DataFrame:
         """
-        Carga todos los archivos CSV del dataset en un único DataFrame.
-        
-        Args:
-            verbose: Mostrar barra de progreso
-            foot: Filtrar por pie ('left', 'right', None=todos)
-            
+        Carga todos los trials del dataset fusionando ambos pies por timestamp.
+
         Returns:
-            DataFrame con todos los datos del dataset
+            DataFrame con 12 columnas de sensores (6 por pie)
         """
-        files = self.get_file_list(foot=foot)
-        
+        trials = self._get_trials()
+
         if verbose:
-            print(f"📁 Encontrados {len(files)} archivos CSV")
-            if foot:
-                print(f"🦶 Filtrando por pie: {foot}")
+            print(f"📁 Encontrados {len(trials)} trials")
             print(f"📊 Cargando datos del dataset Charité-Universitätsmedizin...\n")
-        
-        # Leer todos los archivos
+
         dataframes = []
-        iterator = tqdm(files, desc="Cargando archivos") if verbose else files
-        
-        for file_path in iterator:
+        iterator = tqdm(trials, desc="Cargando trials") if verbose else trials
+
+        for subject_id, trial_id in iterator:
             try:
-                df = self.file_reader.read_file(file_path)
+                df = self._read_trial(subject_id, trial_id)
                 dataframes.append(df)
             except Exception as e:
                 if verbose:
-                    print(f"\n⚠️ Error en {file_path.name}: {str(e)}")
+                    print(f"\n⚠️ Error en S{subject_id} trial {trial_id}: {str(e)}")
                 continue
-        
-        # Concatenar todos los DataFrames
+
         if not dataframes:
-            raise ValueError("No se pudieron cargar datos de ningún archivo")
-        
+            raise ValueError("No se pudieron cargar datos de ningún trial")
+
         self.data = pd.concat(dataframes, ignore_index=True)
-        
+
         if verbose:
             print(f"\n✅ Dataset cargado exitosamente")
             self.print_summary()
-        
+
         return self.data
-    
-    def load_subject_data(self, subject_id: int, foot: Optional[str] = None, **kwargs) -> pd.DataFrame:
+
+    def load_subject_data(self, subject_id: int, **kwargs) -> pd.DataFrame:
         """
-        Carga datos de un sujeto específico.
-        
+        Carga todos los trials de un sujeto específico.
+
         Args:
             subject_id: ID del sujeto (1-16)
-            foot: Filtrar por pie ('left', 'right', None=todos)
-            **kwargs: Parámetros adicionales (no utilizados)
-            
+
         Returns:
             DataFrame con los datos del sujeto
         """
-        # Buscar carpeta del sujeto
         subject_folder = self.dataset_path / f"S{subject_id}"
-        
         if not subject_folder.exists():
             raise FileNotFoundError(f"No se encontró la carpeta para el sujeto {subject_id}")
-        
-        # Obtener archivos del sujeto
-        pattern = f"S{subject_id}_*_foot_trial_*.csv"
-        files = sorted(subject_folder.glob(pattern))
-        
-        if not files:
-            raise FileNotFoundError(f"No se encontraron archivos para el sujeto {subject_id}")
-        
-        # Filtrar por pie si se especifica
-        if foot:
-            foot_pattern = f'_{foot}_foot_'
-            files = [f for f in files if foot_pattern in f.name]
-        
-        # Leer archivos
-        dataframes = []
-        for file_path in files:
-            df = self.file_reader.read_file(file_path)
-            dataframes.append(df)
-        
+
+        left_files = sorted(subject_folder.glob(f"S{subject_id}_left_foot_trial_*.csv"))
+        trial_ids = [self.file_reader._parse_filename(f.name)['trial_id'] for f in left_files]
+
+        dataframes = [self._read_trial(subject_id, tid) for tid in trial_ids]
         return pd.concat(dataframes, ignore_index=True)
-    
+
     def get_summary_by_subject(self) -> pd.DataFrame:
-        """
-        Genera un resumen estadístico por sujeto.
-        
-        Returns:
-            DataFrame con estadísticas por sujeto
-        """
+        """Genera un resumen estadístico por sujeto."""
         if self.data is None:
             raise ValueError("Primero debes cargar los datos con load_all_data()")
-        
-        # Agrupar por sujeto
-        summary = self.data.groupby('subject_id').agg({
-            'time_s': 'max',  # Duración total
-            'fog_label': ['sum', 'count'],  # Total de FoG y muestras
-            'trial_id': 'nunique',  # Número de trials
-            'filename': 'nunique'  # Número de archivos
-        }).round(2)
-        
-        # Renombrar columnas
-        summary.columns = ['duration_s', 'fog_count', 'total_samples', 
-                          'n_trials', 'n_files']
-        
-        # Calcular porcentaje de FoG
+
+        summary = self.data.groupby('subject_id').agg(
+            duration_s=('time_s', 'max'),
+            fog_count=('fog_label', 'sum'),
+            total_samples=('fog_label', 'count'),
+            n_trials=('trial_id', 'nunique'),
+        ).round(2)
+
         summary['fog_percentage'] = (
             (summary['fog_count'] / summary['total_samples']) * 100
         ).round(2)
-        
+
         return summary
-    
-    def get_summary_by_foot(self) -> pd.DataFrame:
-        """
-        Genera un resumen comparativo entre pie izquierdo y derecho.
-        
-        Returns:
-            DataFrame con estadísticas por pie
-        """
-        if self.data is None:
-            raise ValueError("Primero debes cargar los datos con load_all_data()")
-        
-        summary = self.data.groupby('foot').agg({
-            'subject_id': 'nunique',
-            'filename': 'nunique',
-            'time_s': 'max',
-            'fog_label': ['sum', 'count']
-        }).round(2)
-        
-        summary.columns = ['n_subjects', 'n_files', 'total_duration_s', 
-                          'fog_count', 'total_samples']
-        
-        summary['fog_percentage'] = (
-            (summary['fog_count'] / summary['total_samples']) * 100
-        ).round(2)
-        
-        return summary
-    
+
     def get_summary_by_trial(self) -> pd.DataFrame:
-        """
-        Genera un resumen por trial (1 vs 2).
-        
-        Returns:
-            DataFrame con estadísticas por trial
-        """
+        """Genera un resumen por trial (1 vs 2)."""
         if self.data is None:
             raise ValueError("Primero debes cargar los datos con load_all_data()")
-        
-        summary = self.data.groupby('trial_id').agg({
-            'subject_id': 'nunique',
-            'filename': 'nunique',
-            'time_s': 'max',
-            'fog_label': ['sum', 'count']
-        }).round(2)
-        
-        summary.columns = ['n_subjects', 'n_files', 'total_duration_s', 
-                          'fog_count', 'total_samples']
-        
+
+        summary = self.data.groupby('trial_id').agg(
+            n_subjects=('subject_id', 'nunique'),
+            duration_s=('time_s', 'max'),
+            fog_count=('fog_label', 'sum'),
+            total_samples=('fog_label', 'count'),
+        ).round(2)
+
         summary['fog_percentage'] = (
             (summary['fog_count'] / summary['total_samples']) * 100
         ).round(2)
-        
+
         return summary
 
 
 if __name__ == "__main__":
-    # Ejemplo de uso
-    DATASET_PATH = r'Datasets\Charité–Universitätsmedizin Berlin\Data Sheet 2\data'
-    
+    DATASET_PATH = r'Datasets/Charité–Universitätsmedizin Berlin/Data Sheet 2/data'
+
     loader = ChariteDatasetLoader(DATASET_PATH)
     df = loader.load_all_data(verbose=True)
-    
+
     print("\n" + "="*60)
     print("RESUMEN POR SUJETO")
     print("="*60)
     print(loader.get_summary_by_subject().head())
-    
-    print("\n" + "="*60)
-    print("RESUMEN POR PIE")
-    print("="*60)
-    print(loader.get_summary_by_foot())
-    
+
     print("\n" + "="*60)
     print("RESUMEN POR TRIAL")
     print("="*60)
     print(loader.get_summary_by_trial())
-    
-    # Guardar dataset (descomenta para ejecutar)
-    # loader.save_dataset('charite_complete_dataset', formats=['csv', 'parquet'])
+
+    print("\n" + "="*60)
+    print("COLUMNAS DE SENSORES")
+    print("="*60)
+    print(ChariteDatasetLoader.FEATURE_COLUMNS)

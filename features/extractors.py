@@ -111,7 +111,8 @@ class FeatureExtractor:
     def extract_from_window(
         self,
         window: np.ndarray,
-        include_magnitude: bool = True
+        include_magnitude: bool = True,
+        channel_groups: Optional[Dict[str, List[int]]] = None
     ) -> Dict[str, float]:
         """
         Extract features from a multi-channel window.
@@ -121,7 +122,12 @@ class FeatureExtractor:
         window : np.ndarray
             Input window of shape (n_samples, n_channels)
         include_magnitude : bool, optional
-            Whether to include magnitude (norm) of all channels (default: True)
+            Whether to include magnitude features (default: True)
+        channel_groups : dict, optional
+            Groups of channel indices for per-group magnitude computation.
+            Keys are group names (used as prefix), values are lists of indices.
+            Example: {'acc_left_foot': [0,1,2], 'gyr_left_foot': [3,4,5]}
+            If None, computes a single magnitude across all channels (legacy).
 
         Returns
         -------
@@ -132,8 +138,9 @@ class FeatureExtractor:
         --------
         >>> extractor = FeatureExtractor()
         >>> features = extractor.extract_from_window(window)
-        >>> print(len(features))
-        # Returns many features (depending on n_channels and enabled extractors)
+        >>> # With channel groups (physically correct for mixed-unit signals):
+        >>> groups = {'acc': [0,1,2], 'gyr': [3,4,5]}
+        >>> features = extractor.extract_from_window(window, channel_groups=groups)
         """
         features = {}
         n_samples, n_channels = window.shape
@@ -145,15 +152,32 @@ class FeatureExtractor:
             ch_features = self.extract_from_signal(signal, prefix)
             features.update(ch_features)
 
-        # Extract features from magnitude (if enabled)
+        # Extract magnitude features
         if include_magnitude:
-            magnitude = np.linalg.norm(window, axis=1)
-            mag_features = self.extract_from_signal(magnitude, 'mag_')
-            features.update(mag_features)
-
-            # Add cadence estimation from magnitude
-            cadence = self.time_features.cadence_from_peaks(magnitude, self.sampling_rate)
-            features['cadence'] = cadence
+            if channel_groups is not None:
+                # Per-group magnitude: physically correct when channels have different units
+                cadence_signal = None
+                for group_name, indices in channel_groups.items():
+                    group_data = window[:, indices]
+                    magnitude = np.linalg.norm(group_data, axis=1)
+                    mag_features = self.extract_from_signal(magnitude, f'{group_name}_mag_')
+                    features.update(mag_features)
+                    # Use first acc group for cadence (accelerometer is best for step detection)
+                    if cadence_signal is None and group_name.startswith('acc'):
+                        cadence_signal = magnitude
+                # Fallback: use first group if no acc group found
+                if cadence_signal is None:
+                    first_indices = list(channel_groups.values())[0]
+                    cadence_signal = np.linalg.norm(window[:, first_indices], axis=1)
+                cadence = self.time_features.cadence_from_peaks(cadence_signal, self.sampling_rate)
+                features['cadence'] = cadence
+            else:
+                # Legacy: single magnitude across all channels
+                magnitude = np.linalg.norm(window, axis=1)
+                mag_features = self.extract_from_signal(magnitude, 'mag_')
+                features.update(mag_features)
+                cadence = self.time_features.cadence_from_peaks(magnitude, self.sampling_rate)
+                features['cadence'] = cadence
 
         return features
 
@@ -161,7 +185,9 @@ class FeatureExtractor:
         self,
         windows: np.ndarray,
         include_magnitude: bool = True,
-        verbose: bool = False
+        verbose: bool = False,
+        n_jobs: int = 1,
+        channel_groups: Optional[Dict[str, List[int]]] = None
     ) -> pd.DataFrame:
         """
         Extract features from multiple windows.
@@ -174,6 +200,12 @@ class FeatureExtractor:
             Whether to include magnitude features (default: True)
         verbose : bool, optional
             Whether to show progress (default: False)
+        n_jobs : int, optional
+            Number of parallel jobs. -1 uses all CPU cores (default: 1)
+        channel_groups : dict, optional
+            Groups of channel indices for per-group magnitude computation.
+            Example: {'acc_left_foot': [0,1,2], 'gyr_left_foot': [3,4,5]}
+            If None, computes a single magnitude across all channels (legacy).
 
         Returns
         -------
@@ -186,17 +218,32 @@ class FeatureExtractor:
         >>> features_df = extractor.extract_from_windows(windows)
         >>> print(features_df.shape)
         (n_windows, n_features)
-        """
-        if verbose:
-            from tqdm import tqdm
-            iterator = tqdm(windows, desc="Extracting features")
-        else:
-            iterator = windows
 
-        feature_list = []
-        for window in iterator:
-            features = self.extract_from_window(window, include_magnitude)
-            feature_list.append(features)
+        # With channel groups (physically correct for mixed-unit signals):
+        >>> groups = {'acc_left_foot': [0,1,2], 'gyr_left_foot': [3,4,5]}
+        >>> features_df = extractor.extract_from_windows(windows, channel_groups=groups)
+        """
+        if n_jobs == 1:
+            if verbose:
+                from tqdm import tqdm
+                iterator = tqdm(windows, desc="Extracting features")
+            else:
+                iterator = windows
+
+            feature_list = []
+            for window in iterator:
+                features = self.extract_from_window(window, include_magnitude, channel_groups)
+                feature_list.append(features)
+        else:
+            from joblib import Parallel, delayed
+
+            if verbose:
+                print(f"🚀 Extracting features in parallel ({n_jobs} jobs)...")
+
+            feature_list = Parallel(n_jobs=n_jobs, verbose=10 if verbose else 0)(
+                delayed(self.extract_from_window)(window, include_magnitude, channel_groups)
+                for window in windows
+            )
 
         return pd.DataFrame(feature_list)
 

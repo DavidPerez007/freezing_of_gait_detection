@@ -7,17 +7,18 @@ class DaphnetConfig:
     """Configuración del dataset Daphnet."""
     
     # Nombres de las columnas según la documentación
+    # Convención: {sensor}_{eje}_{posición_corporal}
     COLUMN_NAMES = [
         'time_ms',                    # Tiempo en milisegundos
-        'ankle_acc_forward',          # Aceleración tobillo - horizontal forward [mg]
-        'ankle_acc_vertical',         # Aceleración tobillo - vertical [mg]
-        'ankle_acc_lateral',          # Aceleración tobillo - horizontal lateral [mg]
-        'thigh_acc_forward',          # Aceleración muslo - horizontal forward [mg]
-        'thigh_acc_vertical',         # Aceleración muslo - vertical [mg]
-        'thigh_acc_lateral',          # Aceleración muslo - horizontal lateral [mg]
-        'trunk_acc_forward',          # Aceleración tronco - horizontal forward [mg]
-        'trunk_acc_vertical',         # Aceleración tronco - vertical [mg]
-        'trunk_acc_lateral',          # Aceleración tronco - horizontal lateral [mg]
+        'acc_forward_ankle',          # Aceleración tobillo - horizontal forward [mg]
+        'acc_vertical_ankle',         # Aceleración tobillo - vertical [mg]
+        'acc_lateral_ankle',          # Aceleración tobillo - horizontal lateral [mg]
+        'acc_forward_thigh',          # Aceleración muslo - horizontal forward [mg]
+        'acc_vertical_thigh',         # Aceleración muslo - vertical [mg]
+        'acc_lateral_thigh',          # Aceleración muslo - horizontal lateral [mg]
+        'acc_forward_trunk',          # Aceleración tronco - horizontal forward [mg]
+        'acc_vertical_trunk',         # Aceleración tronco - vertical [mg]
+        'acc_lateral_trunk',          # Aceleración tronco - horizontal lateral [mg]
         'annotation'                  # Anotación: 0=No experimento, 1=No freeze, 2=Freeze
     ]
     

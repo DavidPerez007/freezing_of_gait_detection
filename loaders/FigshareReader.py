@@ -22,16 +22,18 @@ class FigshareFileReader(BaseFileReader):
     """Lee archivos individuales del dataset Figshare."""
     
     # Columnas esperadas en los archivos IMU
+    # Sensor colocado en la parte baja de la espalda (lower back)
+    # Convención: {sensor}_{eje}_{posición_corporal}
     COLUMN_NAMES = [
         'frame',
         'time_s',
-        'acc_ml_g',      # ACC ML [g] - Medio-Lateral
-        'acc_ap_g',      # ACC AP [g] - Antero-Posterior
-        'acc_si_g',      # ACC SI [g] - Superior-Inferior
-        'gyr_ml_deg_s',  # GYR ML [deg/s]
-        'gyr_ap_deg_s',  # GYR AP [deg/s]
-        'gyr_si_deg_s',  # GYR SI [deg/s]
-        'freezing_flag'  # Freezing event [flag]
+        'acc_ml_lower_back',   # ACC ML [g] - Medio-Lateral
+        'acc_ap_lower_back',   # ACC AP [g] - Antero-Posterior
+        'acc_si_lower_back',   # ACC SI [g] - Superior-Inferior
+        'gyr_ml_lower_back',   # GYR ML [deg/s] - Medio-Lateral
+        'gyr_ap_lower_back',   # GYR AP [deg/s] - Antero-Posterior
+        'gyr_si_lower_back',   # GYR SI [deg/s] - Superior-Inferior
+        'freezing_flag'        # Freezing event [flag]
     ]
     
     def read_file(self, file_path: Path) -> pd.DataFrame:

@@ -41,10 +41,11 @@ SENSOR_NAMES: List[str] = ['ankle', 'thigh', 'trunk']
 AXES: List[str] = ['forward', 'vertical', 'lateral']
 
 # All feature column names (9 accelerometer channels)
+# Convención: {sensor}_{eje}_{posición_corporal}
 FEATURE_COLUMNS: List[str] = [
-    'ankle_acc_forward', 'ankle_acc_vertical', 'ankle_acc_lateral',
-    'thigh_acc_forward', 'thigh_acc_vertical', 'thigh_acc_lateral',
-    'trunk_acc_forward', 'trunk_acc_vertical', 'trunk_acc_lateral'
+    'acc_forward_ankle', 'acc_vertical_ankle', 'acc_lateral_ankle',
+    'acc_forward_thigh', 'acc_vertical_thigh', 'acc_lateral_thigh',
+    'acc_forward_trunk', 'acc_vertical_trunk', 'acc_lateral_trunk'
 ]
 
 
