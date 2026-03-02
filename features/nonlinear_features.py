@@ -163,9 +163,9 @@ class NonlinearFeatures:
         k_values = np.arange(1, len(L) + 1)
 
         try:
-            # FD = -slope of log(L) vs log(k)
+            # L(k) ~ k^(-FD)  →  log(L) = -FD·log(k) + const  →  FD = -slope
             coeffs = np.polyfit(np.log(k_values), np.log(L), 1)
-            fractal_dim = coeffs[0]  # Slope
+            fractal_dim = -coeffs[0]  # Negate slope to get positive FD
             return float(fractal_dim)
         except Exception:
             return np.nan
@@ -260,8 +260,5 @@ class NonlinearFeatures:
 
         # Fractal dimension
         features[f'{prefix}higuchi_fd'] = cls.higuchi_fractal_dimension(signal)
-
-        # Placeholder for Lyapunov exponent (complex to implement robustly)
-        features[f'{prefix}lyap_exp'] = np.nan
 
         return features

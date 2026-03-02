@@ -99,7 +99,7 @@ class WaveletFeatures:
         Calculate wavelet entropy.
 
         Wavelet entropy measures the disorder/complexity in the signal
-        using the energy distribution across wavelet coefficients.
+        using the energy distribution across decomposition levels.
 
         Parameters
         ----------
@@ -113,28 +113,25 @@ class WaveletFeatures:
 
         Notes
         -----
-        Entropy = -sum(p_i * log(p_i)) where p_i is normalized energy
+        E_j = sum(c_j²) per level j; p_j = E_j / sum(E_j);
+        Entropy = -sum(p_j * log(p_j))  (Rosso et al., 2001)
         """
         coeffs = self.decompose(signal)
 
-        # Concatenate all coefficients
-        all_coeffs = np.concatenate([np.abs(c) for c in coeffs if c.size > 0])
+        # Per-level energy: E_j = sum(c_j²)  (Rosso et al., 2001)
+        energies = np.array([np.sum(c ** 2) for c in coeffs if c.size > 0])
 
-        if all_coeffs.size == 0:
+        if energies.size == 0:
             return np.nan
 
-        # Calculate energy distribution
-        total_energy = np.sum(all_coeffs)
-
-        if total_energy == 0:
+        total = energies.sum()
+        if total == 0:
             return np.nan
 
-        # Normalize to get probability distribution
-        prob = all_coeffs / total_energy
-
-        # Calculate entropy (avoiding log(0))
+        # Probability distribution over levels; entropy over non-zero terms
+        prob = energies / total
         prob = prob[prob > 0]
-        entropy = -np.sum(prob * np.log(prob + 1e-12))
+        entropy = -np.sum(prob * np.log(prob))
 
         return float(entropy)
 
