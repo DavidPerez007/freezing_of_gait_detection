@@ -18,6 +18,8 @@ class FrequencyDomainFeatures:
     Uses Welch's method for Power Spectral Density (PSD) estimation.
     """
 
+    EPSILON = 1e-12
+
     @staticmethod
     def _robust_trapz(y: np.ndarray, x: np.ndarray) -> float:
         """
@@ -216,10 +218,9 @@ class FrequencyDomainFeatures:
         power_freeze = cls.band_power(signal, freeze_band[0], freeze_band[1], sampling_rate)
         power_loco = cls.band_power(signal, loco_band[0], loco_band[1], sampling_rate)
 
-        if power_loco > 0:
+        if power_loco > cls.EPSILON:
             return power_freeze / power_loco
-        else:
-            return np.inf
+        return np.nan
 
     @classmethod
     def spectral_centroid(
@@ -291,7 +292,7 @@ class FrequencyDomainFeatures:
             features[f'{prefix}spectral_centroid']    = np.nan
             features[f'{prefix}power_loco_band']      = 0.0
             features[f'{prefix}power_freeze_band']    = 0.0
-            features[f'{prefix}freezing_index']       = np.inf
+            features[f'{prefix}freezing_index']       = np.nan
             features[f'{prefix}locomotion_band_index'] = 0.0
             return features
 
@@ -320,7 +321,7 @@ class FrequencyDomainFeatures:
 
         # Freezing index (key FoG metric): ratio of freeze to locomotion band power
         features[f'{prefix}freezing_index'] = (
-            power_freeze / power_loco if power_loco > 0 else np.inf
+            power_freeze / power_loco if power_loco > cls.EPSILON else np.nan
         )
 
         # Locomotion Band Index: proportion of total power in the locomotion band
