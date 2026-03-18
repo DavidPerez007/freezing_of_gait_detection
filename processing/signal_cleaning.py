@@ -7,7 +7,15 @@ and handling missing values in time-series sensor data.
 
 import numpy as np
 from typing import Optional
-from utils.constants import OUTLIER_THRESH_MULTIPLIER, OUTLIER_POLY_ORDER, MISSING_VALUE_POLY_ORDER
+from utils.constants import (
+    OUTLIER_THRESH_MULTIPLIER,
+    OUTLIER_POLY_ORDER,
+    MISSING_VALUE_POLY_ORDER,
+    OUTLIER_INTERPOLATION_METHOD,
+    MISSING_VALUE_INTERPOLATION_METHOD,
+    MAX_OUTLIER_FRACTION_PER_CHANNEL,
+    MAX_MISSING_FRACTION_PER_CHANNEL,
+)
 
 
 class SignalCleaner:
@@ -23,7 +31,11 @@ class SignalCleaner:
         self,
         outlier_thresh_mul: float = OUTLIER_THRESH_MULTIPLIER,
         outlier_poly_order: int = OUTLIER_POLY_ORDER,
-        missing_poly_order: int = MISSING_VALUE_POLY_ORDER
+        missing_poly_order: int = MISSING_VALUE_POLY_ORDER,
+        outlier_interpolation_method: str = OUTLIER_INTERPOLATION_METHOD,
+        missing_interpolation_method: str = MISSING_VALUE_INTERPOLATION_METHOD,
+        max_outlier_fraction: float = MAX_OUTLIER_FRACTION_PER_CHANNEL,
+        max_missing_fraction: float = MAX_MISSING_FRACTION_PER_CHANNEL
     ):
         """
         Initialize the SignalCleaner.
@@ -40,6 +52,52 @@ class SignalCleaner:
         self.outlier_thresh_mul = outlier_thresh_mul
         self.outlier_poly_order = outlier_poly_order
         self.missing_poly_order = missing_poly_order
+        self.outlier_interpolation_method = outlier_interpolation_method
+        self.missing_interpolation_method = missing_interpolation_method
+        self.max_outlier_fraction = max_outlier_fraction
+        self.max_missing_fraction = max_missing_fraction
+
+    def _interpolate_masked_values(
+        self,
+        signal: np.ndarray,
+        bad_mask: np.ndarray,
+        poly_order: int,
+        method: str,
+        max_fraction: float
+    ) -> np.ndarray:
+        """Interpolate masked values conservatively to preserve FoG dynamics."""
+        signal = np.array(signal, dtype=float).copy()
+        bad_mask = np.array(bad_mask, dtype=bool)
+
+        if not np.any(bad_mask):
+            return signal
+
+        if bad_mask.mean() > max_fraction:
+            return signal
+
+        idx = np.arange(signal.shape[0])
+        good_idx = idx[~bad_mask]
+        bad_idx = idx[bad_mask]
+
+        if good_idx.size == 0:
+            signal[bad_mask] = 0.0
+            return signal
+
+        if good_idx.size == 1:
+            signal[bad_mask] = signal[good_idx[0]]
+            return signal
+
+        if method == 'polynomial':
+            deg = min(poly_order, good_idx.size - 1)
+            try:
+                coeffs = np.polyfit(good_idx, signal[good_idx], deg)
+                signal[bad_idx] = np.polyval(coeffs, bad_idx)
+                return signal
+            except Exception:
+                pass
+
+        signal[bad_idx] = np.interp(bad_idx, good_idx, signal[good_idx])
+        return signal
 
     def detect_outliers_mad(
         self,
@@ -136,26 +194,13 @@ class SignalCleaner:
                 if not np.any(outlier_mask):
                     continue  # No outliers, skip
 
-                # Get indices
-                idx = np.arange(n_samples)
-                good_idx = idx[~outlier_mask]
-                bad_idx = idx[outlier_mask]
-
-                # Interpolate outliers
-                if good_idx.size >= 2:
-                    deg = min(poly_order, good_idx.size - 1)
-                    try:
-                        coeffs = np.polyfit(good_idx, signal[good_idx], deg)
-                        signal[bad_idx] = np.polyval(coeffs, bad_idx)
-                    except Exception:
-                        # Fallback to linear interpolation
-                        if good_idx.size >= 2:
-                            signal[bad_idx] = np.interp(bad_idx, good_idx, signal[good_idx])
-                        else:
-                            signal[outlier_mask] = np.median(signal)
-                else:
-                    # Not enough good points, use median
-                    signal[outlier_mask] = np.median(signal)
+                signal = self._interpolate_masked_values(
+                    signal,
+                    outlier_mask,
+                    poly_order=poly_order,
+                    method=self.outlier_interpolation_method,
+                    max_fraction=self.max_outlier_fraction,
+                )
 
                 windows_clean[i, :, ch] = signal
 
@@ -205,30 +250,19 @@ class SignalCleaner:
                 if not np.any(nan_mask):
                     continue  # No NaNs, skip
 
-                # Get indices
-                idx = np.arange(n_samples)
-                good_idx = idx[~nan_mask]
-                bad_idx = idx[nan_mask]
+                signal = self._interpolate_masked_values(
+                    signal,
+                    nan_mask,
+                    poly_order=poly_order,
+                    method=self.missing_interpolation_method,
+                    max_fraction=self.max_missing_fraction,
+                )
 
-                # Interpolate missing values
-                if good_idx.size >= 2:
-                    deg = min(poly_order, good_idx.size - 1)
-                    try:
-                        coeffs = np.polyfit(good_idx, signal[good_idx], deg)
-                        signal[bad_idx] = np.polyval(coeffs, bad_idx)
-                    except Exception:
-                        # Fallback to linear interpolation
-                        try:
-                            signal[bad_idx] = np.interp(bad_idx, good_idx, signal[good_idx])
-                        except Exception:
-                            # Fallback to median
-                            signal[bad_idx] = np.nanmedian(signal[good_idx]) if good_idx.size > 0 else 0.0
-                elif good_idx.size == 1:
-                    # Only one valid point, use it
-                    signal[nan_mask] = signal[good_idx[0]]
-                else:
-                    # No valid points, fill with zeros
-                    signal[nan_mask] = 0.0
+                if np.isnan(signal).any():
+                    fill_value = np.nanmedian(signal)
+                    if np.isnan(fill_value):
+                        fill_value = 0.0
+                    signal[np.isnan(signal)] = fill_value
 
                 windows_filled[i, :, ch] = signal
 

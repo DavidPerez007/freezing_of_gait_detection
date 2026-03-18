@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Optional, List
-from utils.constants import LABEL_NAMES_BINARY, LABEL_NAMES_MULTICLASS, SAMPLING_RATE
+from utils.constants import LABEL_NAMES_BINARY, SAMPLING_RATE
 
 
 def plot_window_example(
@@ -63,8 +63,7 @@ def plot_window_example(
 
 
 def plot_fog_distribution_per_fold(
-    loso_splits: List[dict],
-    label_type: str = 'binary'
+    loso_splits: List[dict]
 ) -> None:
     """
     Plot FoG distribution across LOSO folds.
@@ -73,8 +72,6 @@ def plot_fog_distribution_per_fold(
     ----------
     loso_splits : List[dict]
         List of LOSO splits
-    label_type : str, optional
-        Type of labels: 'binary' or 'multiclass' (default: 'binary')
 
     Examples
     --------
@@ -111,8 +108,8 @@ def plot_fog_distribution_per_fold(
             continue
 
         bottom = 0
-        colors = ['steelblue', 'coral', 'gold']
-        labels = list(LABEL_NAMES_MULTICLASS.values()) if label_type == 'multiclass' else list(LABEL_NAMES_BINARY.values())
+        colors = ['steelblue', 'coral']
+        labels = list(LABEL_NAMES_BINARY.values())
 
         for cls_idx, count in enumerate(test_dist):
             axes[1].bar(i, count, bottom=bottom, color=colors[cls_idx % len(colors)],
@@ -121,7 +118,7 @@ def plot_fog_distribution_per_fold(
 
     axes[1].set_xlabel('Fold (Test Subject)')
     axes[1].set_ylabel('Number of Windows')
-    axes[1].set_title(f'{label_type.capitalize()} Distribution in Test Set', fontweight='bold')
+    axes[1].set_title('Binary Distribution in Test Set', fontweight='bold')
     axes[1].set_xticks(range(n_folds))
     axes[1].set_xticklabels([f"F{i}\n{s}" for i, s in enumerate(test_subjects)])
     axes[1].legend()
@@ -166,7 +163,6 @@ def plot_feature_correlation(
 
 def plot_label_distribution(
     labels: pd.Series | np.ndarray,
-    label_type: str = 'binary',
     title: Optional[str] = None
 ) -> None:
     """
@@ -176,14 +172,12 @@ def plot_label_distribution(
     ----------
     labels : pd.Series | np.ndarray
         Label series or array
-    label_type : str, optional
-        Type of labels: 'binary' or 'multiclass' (default: 'binary')
     title : str, optional
         Plot title (default: auto-generated)
 
     Examples
     --------
-    >>> plot_label_distribution(multiclass_labels, 'multiclass')
+    >>> plot_label_distribution(binary_labels)
     """
     if isinstance(labels, pd.Series):
         labels = labels.values
@@ -193,9 +187,9 @@ def plot_label_distribution(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
     # Bar plot
-    label_names = LABEL_NAMES_MULTICLASS if label_type == 'multiclass' else LABEL_NAMES_BINARY
+    label_names = LABEL_NAMES_BINARY
     names = [label_names.get(u, str(u)) for u in unique]
-    colors = ['steelblue', 'coral', 'gold']
+    colors = ['steelblue', 'coral']
 
     ax1.bar(names, counts, color=colors[:len(names)])
     ax1.set_ylabel('Count')

@@ -59,6 +59,18 @@ class FeatureExtractor:
         self.wavelet_features = WaveletFeatures()
         self.nonlinear_features = NonlinearFeatures()
 
+    @staticmethod
+    def _sanitize_feature_dict(features: Dict[str, float]) -> Dict[str, float]:
+        """Replace non-finite feature values with NaN before persisting."""
+        sanitized = {}
+        for key, value in features.items():
+            if isinstance(value, (int, float, np.floating, np.integer)):
+                value = float(value)
+                sanitized[key] = value if np.isfinite(value) else np.nan
+            else:
+                sanitized[key] = value
+        return sanitized
+
     def extract_from_signal(
         self,
         signal: np.ndarray,
@@ -106,7 +118,7 @@ class FeatureExtractor:
             nonlinear_feats = self.nonlinear_features.extract_all(signal, prefix)
             features.update(nonlinear_feats)
 
-        return features
+        return self._sanitize_feature_dict(features)
 
     def extract_from_window(
         self,
@@ -156,28 +168,16 @@ class FeatureExtractor:
         if include_magnitude:
             if channel_groups is not None:
                 # Per-group magnitude: physically correct when channels have different units
-                cadence_signal = None
                 for group_name, indices in channel_groups.items():
                     group_data = window[:, indices]
                     magnitude = np.linalg.norm(group_data, axis=1)
                     mag_features = self.extract_from_signal(magnitude, f'{group_name}_mag_')
                     features.update(mag_features)
-                    # Use first acc group for cadence (accelerometer is best for step detection)
-                    if cadence_signal is None and group_name.startswith('acc'):
-                        cadence_signal = magnitude
-                # Fallback: use first group if no acc group found
-                if cadence_signal is None:
-                    first_indices = list(channel_groups.values())[0]
-                    cadence_signal = np.linalg.norm(window[:, first_indices], axis=1)
-                cadence = self.time_features.cadence_from_peaks(cadence_signal, self.sampling_rate)
-                features['cadence'] = cadence
             else:
                 # Legacy: single magnitude across all channels
                 magnitude = np.linalg.norm(window, axis=1)
                 mag_features = self.extract_from_signal(magnitude, 'mag_')
                 features.update(mag_features)
-                cadence = self.time_features.cadence_from_peaks(magnitude, self.sampling_rate)
-                features['cadence'] = cadence
 
         return features
 

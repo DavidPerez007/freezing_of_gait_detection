@@ -19,18 +19,14 @@ SAMPLING_RATE: int = 64  # Hz - Daphnet dataset sampling frequency
 # Window Configuration
 # ==============================================================================
 
-WINDOW_SIZE_SEC: float = 4.0  # seconds - Duration of sliding windows
+WINDOW_SIZE_SEC: float = 3.0  # seconds - audit-aligned FoG-sensitive window length
 WINDOW_OVERLAP: float = 0.5  # 50% overlap between consecutive windows
-WINDOW_SIZE_SAMPLES: int = int(WINDOW_SIZE_SEC * SAMPLING_RATE)  # 256 samples
-STEP_SIZE_SAMPLES: int = int(WINDOW_SIZE_SAMPLES * (1 - WINDOW_OVERLAP))  # 128 samples
+WINDOW_SIZE_SAMPLES: int = int(WINDOW_SIZE_SEC * SAMPLING_RATE)  # 192 samples at 64 Hz
+STEP_SIZE_SAMPLES: int = int(WINDOW_SIZE_SAMPLES * (1 - WINDOW_OVERLAP))  # 96 samples at 64 Hz
 
-
-# ==============================================================================
-# Pre-FoG Configuration
-# ==============================================================================
-
-PRE_FOG_WINDOW_SEC: float = 0.5  # seconds - Duration of pre-FoG annotation window
-PRE_FOG_WINDOW_SAMPLES: int = int(PRE_FOG_WINDOW_SEC * SAMPLING_RATE)  # 32 samples
+# Window label strategy for FoG detection
+WINDOW_LABEL_STRATEGY: str = 'min_positive_ratio'  # 'majority', 'any_positive', 'center', 'min_positive_ratio'
+WINDOW_LABEL_MIN_POSITIVE_RATIO: float = 0.10  # classify as FoG if >=10% of samples are positive
 
 
 # ==============================================================================
@@ -62,21 +58,10 @@ ANNOTATION_FREEZE: int = 2
 BINARY_NO_FOG: int = 0
 BINARY_FOG: int = 1
 
-# Multiclass label values
-MULTICLASS_NO_FOG: int = 0
-MULTICLASS_FOG: int = 1
-MULTICLASS_PRE_FOG: int = 2
-
 # Label names for visualization
 LABEL_NAMES_BINARY = {
     BINARY_NO_FOG: 'No FoG',
     BINARY_FOG: 'FoG'
-}
-
-LABEL_NAMES_MULTICLASS = {
-    MULTICLASS_NO_FOG: 'No FoG',
-    MULTICLASS_FOG: 'FoG',
-    MULTICLASS_PRE_FOG: 'Pre-FoG'
 }
 
 
@@ -98,7 +83,6 @@ DAPHNET_FEATURES_DIR = OUTPUTS_DIR / 'daphnet_features'
 DAPHNET_COMPLETE_CSV = 'daphnet_complete_dataset.csv'
 DAPHNET_SEGMENTED_CSV = 'daphnet_segmented_dataset.csv'
 DAPHNET_LOSO_BINARY_PKL = 'daphnet_loso_windows_binary.pkl'
-DAPHNET_LOSO_MULTICLASS_PKL = 'daphnet_loso_windows_multiclass.pkl'
 
 
 # ==============================================================================
@@ -106,11 +90,15 @@ DAPHNET_LOSO_MULTICLASS_PKL = 'daphnet_loso_windows_multiclass.pkl'
 # ==============================================================================
 
 # Outlier detection
-OUTLIER_THRESH_MULTIPLIER: float = 3.0  # MAD threshold multiplier
+OUTLIER_THRESH_MULTIPLIER: float = 4.5  # More conservative MAD threshold to avoid removing FoG dynamics
 OUTLIER_POLY_ORDER: int = 3  # Polynomial order for interpolation
+OUTLIER_INTERPOLATION_METHOD: str = 'linear'  # 'linear' or 'polynomial'
+MAX_OUTLIER_FRACTION_PER_CHANNEL: float = 0.15  # avoid aggressive correction of heavily corrupted channels
 
 # Missing value handling
 MISSING_VALUE_POLY_ORDER: int = 3  # Polynomial order for interpolation
+MISSING_VALUE_INTERPOLATION_METHOD: str = 'linear'  # 'linear' or 'polynomial'
+MAX_MISSING_FRACTION_PER_CHANNEL: float = 0.20
 
 
 # ==============================================================================

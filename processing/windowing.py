@@ -13,7 +13,10 @@ from utils.constants import (
     WINDOW_OVERLAP,
     SAMPLING_RATE,
     WINDOW_SIZE_SAMPLES,
-    STEP_SIZE_SAMPLES
+    STEP_SIZE_SAMPLES,
+    WINDOW_LABEL_STRATEGY,
+    WINDOW_LABEL_MIN_POSITIVE_RATIO,
+    BINARY_FOG
 )
 
 
@@ -29,7 +32,10 @@ class WindowCreator:
         self,
         window_size: float = WINDOW_SIZE_SEC,
         overlap: float = WINDOW_OVERLAP,
-        sampling_rate: int = SAMPLING_RATE
+        sampling_rate: int = SAMPLING_RATE,
+        label_strategy: str = WINDOW_LABEL_STRATEGY,
+        positive_labels: Optional[List[int]] = None,
+        min_positive_ratio: float = WINDOW_LABEL_MIN_POSITIVE_RATIO
     ):
         """
         Initialize the WindowCreator.
@@ -46,12 +52,51 @@ class WindowCreator:
         self.window_size = window_size
         self.overlap = overlap
         self.sampling_rate = sampling_rate
+        self.label_strategy = label_strategy
+        self.positive_labels = list(positive_labels) if positive_labels is not None else [BINARY_FOG]
+        self.min_positive_ratio = min_positive_ratio
         self.window_samples = int(window_size * sampling_rate)
         self.step_samples = int(self.window_samples * (1 - overlap))
 
+    def get_window_label_stats(self, window_labels: np.ndarray) -> dict:
+        """
+        Compute label composition statistics inside a window.
+
+        Parameters
+        ----------
+        window_labels : np.ndarray
+            Array of labels within the window
+
+        Returns
+        -------
+        dict
+            Window-level label statistics
+        """
+        window_labels = np.asarray(window_labels)
+
+        if window_labels.size == 0:
+            return {
+                'dominant_label': 0,
+                'positive_ratio': 0.0,
+                'positive_count': 0,
+                'window_length': 0,
+            }
+
+        dominant_label = int(np.bincount(window_labels.astype(int)).argmax())
+        positive_mask = np.isin(window_labels, self.positive_labels)
+        positive_count = int(np.sum(positive_mask))
+        positive_ratio = float(positive_count / len(window_labels))
+
+        return {
+            'dominant_label': dominant_label,
+            'positive_ratio': positive_ratio,
+            'positive_count': positive_count,
+            'window_length': int(len(window_labels)),
+        }
+
     def get_window_label(self, window_labels: np.ndarray) -> int:
         """
-        Determine the label for a window using majority voting.
+        Determine the label for a window using a configurable strategy.
 
         Parameters
         ----------
@@ -71,7 +116,24 @@ class WindowCreator:
         >>> print(window_label)
         0
         """
-        return np.bincount(window_labels).argmax()
+        stats = self.get_window_label_stats(window_labels)
+        dominant_label = stats['dominant_label']
+        positive_ratio = stats['positive_ratio']
+
+        if self.label_strategy == 'majority':
+            return dominant_label
+
+        if self.label_strategy == 'any_positive':
+            return int(positive_ratio > 0)
+
+        if self.label_strategy == 'center':
+            center_idx = len(window_labels) // 2
+            return int(window_labels[center_idx] in self.positive_labels)
+
+        if self.label_strategy == 'min_positive_ratio':
+            return int(positive_ratio >= self.min_positive_ratio)
+
+        raise ValueError(f"Unknown label strategy: {self.label_strategy}")
 
     def create_sliding_windows(
         self,
@@ -79,7 +141,8 @@ class WindowCreator:
         labels: np.ndarray,
         window_size: Optional[float] = None,
         overlap: Optional[float] = None,
-        sampling_rate: Optional[int] = None
+        sampling_rate: Optional[int] = None,
+        return_metadata: bool = False
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Create sliding windows from continuous time-series data.
@@ -123,6 +186,7 @@ class WindowCreator:
 
         windows = []
         window_labels = []
+        metadata = []
 
         # Create windows
         for start in range(0, len(data) - window_samples + 1, step_samples):
@@ -134,9 +198,18 @@ class WindowCreator:
 
             # Window label: majority voting
             window_label = self.get_window_label(window_label_segment)
+            label_stats = self.get_window_label_stats(window_label_segment)
 
             windows.append(window)
             window_labels.append(window_label)
+            metadata.append({
+                'start': int(start),
+                'end': int(end),
+                **label_stats,
+            })
+
+        if return_metadata:
+            return np.array(windows), np.array(window_labels), metadata
 
         return np.array(windows), np.array(window_labels)
 
@@ -146,7 +219,8 @@ class WindowCreator:
         feature_cols: List[str],
         label_col: str,
         subject_col: str = 'subject',
-        trial_col: str = 'trial'
+        trial_col: str = 'trial',
+        return_metadata: bool = False
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Create sliding windows per subject and trial to maintain temporal continuity.
@@ -186,6 +260,7 @@ class WindowCreator:
         all_windows = []
         all_labels = []
         all_subjects = []
+        all_metadata = []
 
         for subject in df[subject_col].unique():
             subject_trials = df[df[subject_col] == subject][trial_col].unique()
@@ -200,12 +275,22 @@ class WindowCreator:
                 y_subject = subject_data[label_col].values
 
                 # Create windows for this subject/trial
-                windows, labels = self.create_sliding_windows(X_subject, y_subject)
+                if return_metadata:
+                    windows, labels, metadata = self.create_sliding_windows(
+                        X_subject, y_subject, return_metadata=True
+                    )
+                else:
+                    windows, labels = self.create_sliding_windows(X_subject, y_subject)
 
                 if len(windows) > 0:
                     all_windows.append(windows)
                     all_labels.append(labels)
                     all_subjects.extend([subject] * len(windows))
+                    if return_metadata:
+                        for item in metadata:
+                            item['subject'] = subject
+                            item['trial'] = trial
+                        all_metadata.extend(metadata)
 
         # Concatenate all windows
         if len(all_windows) > 0:
@@ -217,6 +302,9 @@ class WindowCreator:
             all_labels = np.array([])
             all_subjects = np.array([])
 
+        if return_metadata:
+            return all_windows, all_labels, all_subjects, all_metadata
+
         return all_windows, all_labels, all_subjects
 
     def create_windows_from_df(
@@ -224,12 +312,15 @@ class WindowCreator:
         df: pd.DataFrame,
         feature_cols: List[str],
         binary_label_col: str = 'binary_label',
-        multiclass_label_col: str = 'multiclass_label',
         subject_col: str = 'subject',
-        trial_col: str = 'trial'
+        trial_col: str = 'trial',
+        binary_label_strategy: Optional[str] = None,
+        binary_positive_labels: Optional[List[int]] = None,
+        binary_min_positive_ratio: Optional[float] = None,
+        return_metadata: bool = False
     ) -> dict:
         """
-        Create windows for both binary and multiclass labels.
+        Create windows for binary labels.
 
         Parameters
         ----------
@@ -239,8 +330,6 @@ class WindowCreator:
             List of feature column names
         binary_label_col : str, optional
             Name of binary label column (default: 'binary_label')
-        multiclass_label_col : str, optional
-            Name of multiclass label column (default: 'multiclass_label')
         subject_col : str, optional
             Name of subject column (default: 'subject')
         trial_col : str, optional
@@ -249,39 +338,46 @@ class WindowCreator:
         Returns
         -------
         dict
-            Dictionary with keys:
-            - 'binary': {'windows': np.ndarray, 'labels': np.ndarray, 'subjects': np.ndarray}
-            - 'multiclass': {'windows': np.ndarray, 'labels': np.ndarray, 'subjects': np.ndarray}
+            Dictionary with key 'binary' containing window arrays, labels, and subjects
 
         Examples
         --------
         >>> creator = WindowCreator()
         >>> result = creator.create_windows_from_df(df, feature_cols)
         >>> binary_windows = result['binary']['windows']
-        >>> multiclass_windows = result['multiclass']['windows']
         """
-        # Create binary windows
-        binary_windows, binary_labels, binary_subjects = self.create_windows_per_subject(
-            df, feature_cols, binary_label_col, subject_col, trial_col
+        binary_creator = WindowCreator(
+            window_size=self.window_size,
+            overlap=self.overlap,
+            sampling_rate=self.sampling_rate,
+            label_strategy=binary_label_strategy or self.label_strategy,
+            positive_labels=binary_positive_labels or self.positive_labels,
+            min_positive_ratio=(
+                self.min_positive_ratio if binary_min_positive_ratio is None else binary_min_positive_ratio
+            )
         )
 
-        # Create multiclass windows
-        multiclass_windows, multiclass_labels, multiclass_subjects = self.create_windows_per_subject(
-            df, feature_cols, multiclass_label_col, subject_col, trial_col
-        )
+        if return_metadata:
+            binary_windows, binary_labels, binary_subjects, binary_metadata = binary_creator.create_windows_per_subject(
+                df, feature_cols, binary_label_col, subject_col, trial_col, return_metadata=True
+            )
+        else:
+            binary_windows, binary_labels, binary_subjects = binary_creator.create_windows_per_subject(
+                df, feature_cols, binary_label_col, subject_col, trial_col
+            )
 
-        return {
+        result = {
             'binary': {
                 'windows': binary_windows,
                 'labels': binary_labels,
                 'subjects': binary_subjects
-            },
-            'multiclass': {
-                'windows': multiclass_windows,
-                'labels': multiclass_labels,
-                'subjects': multiclass_subjects
             }
         }
+
+        if return_metadata:
+            result['binary']['metadata'] = binary_metadata
+
+        return result
 
     def get_window_info(self) -> dict:
         """
@@ -304,5 +400,8 @@ class WindowCreator:
             'window_samples': self.window_samples,
             'overlap': self.overlap,
             'step_samples': self.step_samples,
-            'sampling_rate': self.sampling_rate
+            'sampling_rate': self.sampling_rate,
+            'label_strategy': self.label_strategy,
+            'positive_labels': self.positive_labels,
+            'min_positive_ratio': self.min_positive_ratio,
         }

@@ -250,15 +250,12 @@ class NonlinearFeatures:
         --------
         >>> features = NonlinearFeatures.extract_all(signal, prefix='ankle_x_')
         >>> print(features.keys())
-        dict_keys(['ankle_x_sample_entropy', 'ankle_x_higuchi_fd', ...])
+        dict_keys(['ankle_x_sample_entropy', 'ankle_x_approx_entropy'])
         """
         features = {}
 
         # Entropy measures
         features[f'{prefix}sample_entropy'] = cls.sample_entropy(signal)
         features[f'{prefix}approx_entropy'] = cls.approximate_entropy(signal)
-
-        # Fractal dimension
-        features[f'{prefix}higuchi_fd'] = cls.higuchi_fractal_dimension(signal)
 
         return features

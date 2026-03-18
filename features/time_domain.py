@@ -7,7 +7,6 @@ features from time-series signals.
 
 import numpy as np
 from scipy import stats
-from scipy.signal import find_peaks
 from typing import Dict
 
 
@@ -89,40 +88,6 @@ class TimeDomainFeatures:
         """
         zero_crossings = np.where(np.diff(np.sign(signal)))[0]
         return len(zero_crossings) / len(signal)
-
-    @staticmethod
-    def cadence_from_peaks(
-        signal: np.ndarray,
-        sampling_rate: int = 64,
-        min_peak_distance_sec: float = 0.3
-    ) -> float:
-        """
-        Estimate cadence (steps per minute) from peak detection.
-
-        Parameters
-        ----------
-        signal : np.ndarray
-            Input signal (typically magnitude of acceleration)
-        sampling_rate : int, optional
-            Sampling rate in Hz (default: 64)
-        min_peak_distance_sec : float, optional
-            Minimum distance between peaks in seconds (default: 0.3)
-
-        Returns
-        -------
-        float
-            Estimated cadence in steps per minute
-        """
-        min_distance = int(min_peak_distance_sec * sampling_rate)
-        peaks, _ = find_peaks(signal, distance=min_distance)
-
-        steps = len(peaks)
-        duration_min = len(signal) / sampling_rate / 60.0
-
-        if duration_min > 0:
-            return steps / duration_min
-        else:
-            return 0.0
 
     @classmethod
     def extract_all(
