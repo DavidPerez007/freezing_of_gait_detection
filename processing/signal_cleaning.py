@@ -1,11 +1,12 @@
 """
-Signal cleaning functions for Daphnet FoG Dataset processing.
+Signal cleaning functions for FoG Dataset processing.
 
 This module provides functions for detecting and correcting outliers,
-and handling missing values in time-series sensor data.
+handling missing values, and bandpass filtering in time-series sensor data.
 """
 
 import numpy as np
+from scipy.signal import butter, sosfiltfilt
 from typing import Optional
 from utils.constants import (
     OUTLIER_THRESH_MULTIPLIER,
@@ -267,6 +268,104 @@ class SignalCleaner:
                 windows_filled[i, :, ch] = signal
 
         return windows_filled
+
+    @staticmethod
+    def bandpass_filter_windows(
+        windows: np.ndarray,
+        sampling_rate: int,
+        low_freq: float = 0.5,
+        high_freq: float = 25.0,
+        order: int = 4
+    ) -> np.ndarray:
+        """
+        Apply a Butterworth bandpass filter to each channel of each window.
+
+        Removes gravity/DC offset (below low_freq) and high-frequency noise
+        (above high_freq), preserving the FoG-relevant 0.5-8 Hz band.
+
+        Parameters
+        ----------
+        windows : np.ndarray
+            Input windows of shape (n_windows, n_samples, n_channels)
+        sampling_rate : int
+            Sampling rate in Hz
+        low_freq : float
+            Lower cutoff frequency in Hz (default: 0.5)
+        high_freq : float
+            Upper cutoff frequency in Hz (default: 25.0)
+        order : int
+            Butterworth filter order (default: 4)
+
+        Returns
+        -------
+        np.ndarray
+            Filtered windows with same shape as input
+        """
+        nyquist = sampling_rate / 2.0
+        high_freq = min(high_freq, nyquist - 1.0)
+        if low_freq >= high_freq:
+            return windows.copy()
+
+        sos = butter(order, [low_freq / nyquist, high_freq / nyquist],
+                     btype='band', output='sos')
+
+        filtered = windows.copy().astype(float)
+        n_windows, n_samples, n_channels = filtered.shape
+
+        for i in range(n_windows):
+            for ch in range(n_channels):
+                try:
+                    filtered[i, :, ch] = sosfiltfilt(sos, filtered[i, :, ch])
+                except ValueError:
+                    pass  # skip if window too short for filter
+
+        return filtered
+
+    @staticmethod
+    def bandpass_filter_signal(
+        signal: np.ndarray,
+        sampling_rate: int,
+        low_freq: float = 0.5,
+        high_freq: float = 25.0,
+        order: int = 4
+    ) -> np.ndarray:
+        """
+        Apply a Butterworth bandpass filter to a multi-channel continuous signal.
+
+        Parameters
+        ----------
+        signal : np.ndarray
+            Input signal of shape (n_samples,) or (n_samples, n_channels)
+        sampling_rate : int
+            Sampling rate in Hz
+        low_freq : float
+            Lower cutoff frequency in Hz (default: 0.5)
+        high_freq : float
+            Upper cutoff frequency in Hz (default: 25.0)
+        order : int
+            Butterworth filter order (default: 4)
+
+        Returns
+        -------
+        np.ndarray
+            Filtered signal with same shape as input
+        """
+        nyquist = sampling_rate / 2.0
+        high_freq = min(high_freq, nyquist - 1.0)
+        if low_freq >= high_freq:
+            return signal.copy()
+
+        sos = butter(order, [low_freq / nyquist, high_freq / nyquist],
+                     btype='band', output='sos')
+
+        filtered = signal.copy().astype(float)
+        if filtered.ndim == 1:
+            filtered = sosfiltfilt(sos, filtered)
+        else:
+            for ch in range(filtered.shape[1]):
+                filtered[:, ch] = sosfiltfilt(sos, filtered[:, ch])
+
+        return filtered
 
     def clean_windows(
         self,
