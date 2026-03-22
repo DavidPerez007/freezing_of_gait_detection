@@ -96,6 +96,33 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs" / "figshare_improved_results"
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
+def interpolate_missing(data: np.ndarray) -> np.ndarray:
+    """Fill NaN values per channel using cubic spline interpolation.
+    Falls back to linear for short segments, ffill/bfill for edges."""
+    from scipy.interpolate import CubicSpline
+    data = data.copy()
+    if data.ndim == 1:
+        mask = np.isnan(data)
+        if not mask.any():
+            return data
+        good = np.flatnonzero(~mask)
+        bad = np.flatnonzero(mask)
+        if len(good) == 0:
+            data[:] = 0.0
+            return data
+        if len(good) >= 4:
+            cs = CubicSpline(good, data[good], extrapolate=True)
+            data[bad] = cs(bad)
+        elif len(good) >= 2:
+            data[bad] = np.interp(bad, good, data[good])
+        else:
+            data[mask] = data[good[0]]
+        return data
+    for col in range(data.shape[1]):
+        data[:, col] = interpolate_missing(data[:, col])
+    return data
+
+
 def bandpass_filter(data: np.ndarray, fs: int = FS, low: float = BP_LOW,
                     high: float = BP_HIGH, order: int = BP_ORDER) -> np.ndarray:
     """Apply zero-phase Butterworth bandpass filter."""
@@ -188,15 +215,8 @@ def load_and_preprocess() -> Dict[int, Dict]:
             if np.all(np.isnan(signal_raw)):
                 continue
 
-            # Interpolate NaN in signal
-            for col_idx in range(signal_raw.shape[1]):
-                col = signal_raw[:, col_idx]
-                nans = np.isnan(col)
-                if nans.any() and not nans.all():
-                    col[nans] = np.interp(np.flatnonzero(nans), np.flatnonzero(~nans), col[~nans])
-                signal_raw[:, col_idx] = col
-
-            # Fill NaN in labels
+            # Interpolate missing values before filtering
+            signal_raw = interpolate_missing(signal_raw)
             labels_raw = np.nan_to_num(labels_raw, nan=0.0)
 
             # Bandpass filter
