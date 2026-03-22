@@ -131,7 +131,7 @@ class WaveletFeatures:
         # Probability distribution over levels; entropy over non-zero terms
         prob = energies / total
         prob = prob[prob > 0]
-        entropy = -np.sum(prob * np.log(prob))
+        entropy = -np.sum(prob * np.log(prob + 1e-12))
 
         return float(entropy)
 

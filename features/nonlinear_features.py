@@ -64,6 +64,8 @@ class NonlinearFeatures:
 
         if r is None:
             r = SAMPEN_R_MULTIPLIER * np.std(x)
+        if r < 1e-12:
+            return np.nan
 
         def _phi(m_val):
             """Helper function to calculate template matches."""
@@ -159,12 +161,16 @@ class NonlinearFeatures:
         if len(L) < 2:
             return np.nan
 
-        # Fit log-log plot to estimate fractal dimension
+        # Filter out zero/negative values before log
+        valid = L > 0
+        if np.sum(valid) < 2:
+            return np.nan
+
         k_values = np.arange(1, len(L) + 1)
 
         try:
             # L(k) ~ k^(-FD)  →  log(L) = -FD·log(k) + const  →  FD = -slope
-            coeffs = np.polyfit(np.log(k_values), np.log(L), 1)
+            coeffs = np.polyfit(np.log(k_values[valid]), np.log(L[valid]), 1)
             fractal_dim = -coeffs[0]  # Negate slope to get positive FD
             return float(fractal_dim)
         except Exception:
@@ -203,6 +209,8 @@ class NonlinearFeatures:
 
         if r is None:
             r = 0.2 * np.std(x)
+        if r < 1e-12:
+            return np.nan
 
         def _phi(m_val):
             """Helper function."""

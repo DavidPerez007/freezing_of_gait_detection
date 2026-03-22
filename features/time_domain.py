@@ -48,12 +48,22 @@ class TimeDomainFeatures:
     @staticmethod
     def skewness(signal: np.ndarray) -> float:
         """Calculate skewness (asymmetry of distribution)."""
-        return float(stats.skew(signal))
+        if np.std(signal) < 1e-12:
+            return 0.0
+        try:
+            return float(stats.skew(signal))
+        except Exception:
+            return 0.0
 
     @staticmethod
     def kurtosis(signal: np.ndarray) -> float:
         """Calculate kurtosis (tailedness of distribution)."""
-        return float(stats.kurtosis(signal))
+        if np.std(signal) < 1e-12:
+            return 0.0
+        try:
+            return float(stats.kurtosis(signal))
+        except Exception:
+            return 0.0
 
     @staticmethod
     def median(signal: np.ndarray) -> float:
@@ -69,17 +79,21 @@ class TimeDomainFeatures:
     @staticmethod
     def peak_to_peak(signal: np.ndarray) -> float:
         """Calculate peak-to-peak amplitude."""
-        return float(np.ptp(signal))
+        return float(signal.max() - signal.min()) if len(signal) > 0 else 0.0
 
     @staticmethod
     def zero_crossing_rate(signal: np.ndarray) -> float:
         """Calculate zero-crossing rate (normalized by signal length)."""
+        if len(signal) < 2:
+            return 0.0
         zero_crossings = np.where(np.diff(np.sign(signal)))[0]
         return len(zero_crossings) / len(signal)
 
     @staticmethod
     def mean_crossing_rate(signal: np.ndarray) -> float:
         """Calculate mean-crossing rate (crossings around mean, normalized)."""
+        if len(signal) < 2:
+            return 0.0
         centered = signal - np.mean(signal)
         crossings = np.where(np.diff(np.sign(centered)))[0]
         return len(crossings) / len(signal)
