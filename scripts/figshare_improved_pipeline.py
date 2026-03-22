@@ -378,14 +378,25 @@ def preprocess_features(X_train: pd.DataFrame, X_test: pd.DataFrame,
 
 def train_and_evaluate_classifier(clf_name, clf, param_grid, X_train, y_train,
                                    X_test, y_test):
-    """Train one classifier with hyperparameter tuning, optimize threshold."""
-    X_tr, y_tr = X_train, y_train
-    if HAS_SMOTE and len(np.unique(y_train)) > 1 and np.sum(y_train == 1) >= 6:
+    """Train one classifier with hyperparameter tuning, optimize threshold on validation set."""
+    from sklearn.model_selection import train_test_split
+
+    # Split training into train/val for threshold optimization (no test leakage)
+    has_both_train = len(np.unique(y_train)) > 1
+    if has_both_train and len(y_train) > 20:
+        X_tr_fit, X_tr_val, y_tr_fit, y_tr_val = train_test_split(
+            X_train, y_train, test_size=0.2, stratify=y_train, random_state=SEED)
+    else:
+        X_tr_fit, X_tr_val, y_tr_fit, y_tr_val = X_train, X_train, y_train, y_train
+
+    # SMOTE on train-fit portion only
+    X_tr_sm, y_tr_sm = X_tr_fit, y_tr_fit
+    if HAS_SMOTE and len(np.unique(y_tr_fit)) > 1 and np.sum(y_tr_fit == 1) >= 6:
         try:
-            k_neighbors = min(5, np.sum(y_train == 1) - 1)
+            k_neighbors = min(5, np.sum(y_tr_fit == 1) - 1)
             if k_neighbors >= 1:
                 sm = SMOTE(random_state=SEED, k_neighbors=k_neighbors)
-                X_tr, y_tr = sm.fit_resample(X_train, y_train)
+                X_tr_sm, y_tr_sm = sm.fit_resample(X_tr_fit, y_tr_fit)
         except Exception:
             pass
 
@@ -396,24 +407,29 @@ def train_and_evaluate_classifier(clf_name, clf, param_grid, X_train, y_train,
             clf, param_grid, n_iter=n_iter, cv=inner_cv, scoring="f1",
             random_state=SEED, n_jobs=-1, error_score=0.0,
         )
-        search.fit(X_tr, y_tr)
+        search.fit(X_tr_sm, y_tr_sm)
         best_clf = search.best_estimator_
         best_params = search.best_params_
     except Exception as e:
         log.warning("  %s search failed (%s), using defaults", clf_name, e)
-        clf.fit(X_tr, y_tr)
+        clf.fit(X_tr_sm, y_tr_sm)
         best_clf = clf
         best_params = {}
 
+    # Optimize threshold on VALIDATION set (not test)
     if hasattr(best_clf, "predict_proba"):
+        y_val_prob = best_clf.predict_proba(X_tr_val)[:, 1]
         y_prob = best_clf.predict_proba(X_test)[:, 1]
     elif hasattr(best_clf, "decision_function"):
+        y_val_prob = best_clf.decision_function(X_tr_val)
         y_prob = best_clf.decision_function(X_test)
     else:
+        y_val_prob = best_clf.predict(X_tr_val).astype(float)
         y_prob = best_clf.predict(X_test).astype(float)
 
-    threshold = youden_threshold(y_test, y_prob)
+    threshold = youden_threshold(y_tr_val, y_val_prob)
     y_pred = (y_prob >= threshold).astype(int)
+
     metrics = compute_metrics(y_test, y_pred, y_prob)
     metrics["threshold"] = threshold
     metrics["best_params"] = best_params
@@ -476,8 +492,55 @@ def get_sensor_group_features(X: pd.DataFrame, group: str) -> pd.DataFrame:
     return X[cols] if cols else X
 
 
+def _build_group_model(X_tr, y_tr, X_te):
+    """Train a per-group RF model. Returns (test_probs, train_oof_probs)."""
+    from sklearn.model_selection import StratifiedKFold as SKF
+
+    X_tr = np.asarray(X_tr, dtype=np.float64)
+    X_te = np.asarray(X_te, dtype=np.float64)
+
+    # Generate OOF predictions for stacking (no leakage)
+    oof_probs = np.zeros(len(y_tr))
+    inner_cv = SKF(n_splits=3, shuffle=True, random_state=SEED)
+
+    for tr_idx, val_idx in inner_cv.split(X_tr, y_tr):
+        X_f, y_f = X_tr[tr_idx], y_tr[tr_idx]
+        X_v = X_tr[val_idx]
+
+        if HAS_SMOTE and np.sum(y_f == 1) >= 6:
+            try:
+                k_n = min(5, int(np.sum(y_f == 1)) - 1)
+                sm = SMOTE(random_state=SEED, k_neighbors=k_n)
+                X_f, y_f = sm.fit_resample(X_f, y_f)
+            except Exception:
+                pass
+
+        clf_inner = RandomForestClassifier(n_estimators=200, max_depth=20,
+                                           class_weight="balanced", random_state=SEED, n_jobs=-1)
+        clf_inner.fit(X_f, y_f)
+        oof_probs[val_idx] = clf_inner.predict_proba(X_v)[:, 1]
+
+    # Train final model on full training set for test predictions
+    X_tr_sm, y_tr_sm = X_tr, y_tr
+    if HAS_SMOTE and np.sum(y_tr == 1) >= 6:
+        try:
+            k_n = min(5, int(np.sum(y_tr == 1)) - 1)
+            sm = SMOTE(random_state=SEED, k_neighbors=k_n)
+            X_tr_sm, y_tr_sm = sm.fit_resample(X_tr, y_tr)
+        except Exception:
+            pass
+
+    clf_full = RandomForestClassifier(n_estimators=200, max_depth=20,
+                                       class_weight="balanced", random_state=SEED, n_jobs=-1)
+    clf_full.fit(X_tr_sm, y_tr_sm)
+    test_probs = clf_full.predict_proba(X_te)[:, 1]
+
+    return test_probs, oof_probs
+
+
 def run_fusion_evaluation(features: Dict):
-    """Run 3 fusion techniques evaluation."""
+    """Run 3 fusion techniques evaluation. No test-set leakage."""
+    from sklearn.model_selection import train_test_split
     subjects = sorted(features.keys())
     fusion_results = {"feature_level": [], "stacking": [], "weighted_voting": []}
 
@@ -504,16 +567,25 @@ def run_fusion_evaluation(features: Dict):
                                          random_state=SEED, n_jobs=-1)
         clf_fl.fit(X_tr_sm, y_tr_sm)
         y_prob_fl = clf_fl.predict_proba(X_te_p)[:, 1]
-        thr_fl = youden_threshold(y_test, y_prob_fl)
+
+        # Threshold on validation split (not test)
+        if len(y_train) > 20 and len(np.unique(y_train)) > 1:
+            _, X_val_fl, _, y_val_fl = train_test_split(X_tr_p, y_train, test_size=0.2,
+                                                         stratify=y_train, random_state=SEED)
+            y_val_prob_fl = clf_fl.predict_proba(X_val_fl)[:, 1]
+            thr_fl = youden_threshold(y_val_fl, y_val_prob_fl)
+        else:
+            thr_fl = 0.5
+
         y_pred_fl = (y_prob_fl >= thr_fl).astype(int)
         m_fl = compute_metrics(y_test, y_pred_fl, y_prob_fl)
         m_fl["subject"] = test_sid
         m_fl["has_both_classes"] = has_both
         fusion_results["feature_level"].append(m_fl)
 
-        # ── Per-sensor-group models ──
-        group_probs_test = {}
-        group_probs_train = {}
+        # ── Per-sensor-group models with OOF predictions ──
+        group_oof = {}
+        group_test = {}
 
         for group_name in ["acc", "gyr", "all"]:
             X_tr_g = get_sensor_group_features(X_train, group_name)
@@ -531,7 +603,6 @@ def run_fusion_evaluation(features: Dict):
                 X_te_g_vt = pd.DataFrame(vt.transform(X_te_g))
             except Exception:
                 continue
-
             if X_tr_g_vt.shape[1] == 0:
                 continue
 
@@ -548,46 +619,37 @@ def run_fusion_evaluation(features: Dict):
             X_tr_g_sel = sel.fit_transform(X_tr_g_sc, y_train)
             X_te_g_sel = sel.transform(X_te_g_sc)
 
-            X_g_sm, y_g_sm = X_tr_g_sel, y_train
-            if HAS_SMOTE and np.sum(y_train == 1) >= 6:
-                try:
-                    k_n = min(5, np.sum(y_train == 1) - 1)
-                    sm = SMOTE(random_state=SEED, k_neighbors=k_n)
-                    X_g_sm, y_g_sm = sm.fit_resample(X_tr_g_sel, y_train)
-                except Exception:
-                    pass
+            test_probs, oof_probs = _build_group_model(X_tr_g_sel, y_train, X_te_g_sel)
+            group_test[group_name] = test_probs
+            group_oof[group_name] = oof_probs
 
-            clf_g = RandomForestClassifier(n_estimators=200, max_depth=20,
-                                           class_weight="balanced", random_state=SEED, n_jobs=-1)
-            clf_g.fit(X_g_sm, y_g_sm)
-            group_probs_test[group_name] = clf_g.predict_proba(X_te_g_sel)[:, 1]
-            group_probs_train[group_name] = clf_g.predict_proba(X_tr_g_sel)[:, 1]
-
-        if len(group_probs_test) < 2:
+        if len(group_test) < 2:
             continue
 
-        group_names = list(group_probs_test.keys())
-        P_test = np.column_stack([group_probs_test[g] for g in group_names])
-        P_train = np.column_stack([group_probs_train[g] for g in group_names])
+        group_names = list(group_test.keys())
+        P_test = np.column_stack([group_test[g] for g in group_names])
+        P_oof = np.column_stack([group_oof[g] for g in group_names])
 
-        # ── Fusion 2: Stacking ──
+        # ── Fusion 2: Stacking with OOF predictions (no leakage) ──
         meta_clf = LogisticRegression(class_weight="balanced", max_iter=1000, random_state=SEED)
-        meta_clf.fit(P_train, y_train)
+        meta_clf.fit(P_oof, y_train)
         y_prob_stack = meta_clf.predict_proba(P_test)[:, 1]
-        thr_st = youden_threshold(y_test, y_prob_stack)
+
+        y_oof_stack = meta_clf.predict_proba(P_oof)[:, 1]
+        thr_st = youden_threshold(y_train, y_oof_stack)
         y_pred_stack = (y_prob_stack >= thr_st).astype(int)
         m_st = compute_metrics(y_test, y_pred_stack, y_prob_stack)
         m_st["subject"] = test_sid
         m_st["has_both_classes"] = has_both
         fusion_results["stacking"].append(m_st)
 
-        # ── Fusion 3: Weighted Voting ──
+        # ── Fusion 3: Weighted Voting — weights optimized on OOF (not test) ──
         def neg_f1_weighted(w):
             w = np.abs(w)
             w = w / (w.sum() + 1e-12)
-            fused = P_test @ w
+            fused = P_oof @ w
             preds = (fused >= 0.5).astype(int)
-            return -f1_score(y_test, preds, zero_division=0)
+            return -f1_score(y_train, preds, zero_division=0)
 
         w0 = np.ones(len(group_names)) / len(group_names)
         try:
@@ -598,7 +660,8 @@ def run_fusion_evaluation(features: Dict):
             w_opt = w0
 
         y_prob_wv = P_test @ w_opt
-        thr_wv = youden_threshold(y_test, y_prob_wv)
+        y_oof_wv = P_oof @ w_opt
+        thr_wv = youden_threshold(y_train, y_oof_wv)
         y_pred_wv = (y_prob_wv >= thr_wv).astype(int)
         m_wv = compute_metrics(y_test, y_pred_wv, y_prob_wv)
         m_wv["subject"] = test_sid
