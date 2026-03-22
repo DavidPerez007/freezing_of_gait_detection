@@ -110,9 +110,16 @@ class TimeDomainFeatures:
     @staticmethod
     def entropy(signal: np.ndarray, n_bins: int = 20) -> float:
         """Calculate signal entropy from histogram approximation."""
-        hist, _ = np.histogram(signal, bins=n_bins, density=True)
+        sig_range = signal.max() - signal.min()
+        if sig_range < 1e-12 or len(signal) < 2:
+            return 0.0
+        actual_bins = min(n_bins, max(2, int(np.sqrt(len(signal)))))
+        try:
+            hist, _ = np.histogram(signal, bins=actual_bins, density=True)
+        except ValueError:
+            return 0.0
         hist = hist[hist > 0]
-        bin_width = (signal.max() - signal.min()) / n_bins if signal.max() != signal.min() else 1.0
+        bin_width = sig_range / actual_bins
         probs = hist * bin_width
         probs = probs[probs > 0]
         return float(-np.sum(probs * np.log2(probs + 1e-12)))
