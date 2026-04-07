@@ -68,7 +68,7 @@ def interpolate_missing(data: np.ndarray) -> np.ndarray:
 
 
 def bandpass_filter(data: np.ndarray, fs: int, low: float = 0.5,
-                    high: float = 20.0, order: int = 4) -> np.ndarray:
+                    high: float = 25.0, order: int = 4) -> np.ndarray:
     """Apply zero-phase Butterworth bandpass filter."""
     sos = butter(order, [low, high], btype="band", fs=fs, output="sos")
     if data.ndim == 1:
@@ -198,7 +198,7 @@ def prepare_fold(features: Dict, test_sid: int):
 
 
 def preprocess_features(X_train: pd.DataFrame, X_test: pd.DataFrame,
-                        y_train: np.ndarray, k: int = 60):
+                        y_train: np.ndarray, k: int = 80):
     """Clean, scale, select features. Returns processed arrays + selector."""
     # Replace inf
     X_train = X_train.replace([np.inf, -np.inf], np.nan)
